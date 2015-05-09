@@ -36,7 +36,7 @@
 			<div style="display:inline-block">></div>
 			<div style="display:inline-block">
 				<input type="text" id="cli" onblur="this.focus()" 
-					spellcheck="false" maxlength="10" autofocus>
+					spellcheck="false" maxlength="32" autofocus>
 				</input>
 			</div>
 		</div>
@@ -54,7 +54,7 @@ window.onload = function() {
 // SET UP SOCKET.IO
 // ----------------------------------------------------------------------------
 
- var socket = io();
+ var socket = null; // create later at user request
 
 // ----------------------------------------------------------------------------
 // SET UP PIXI.JS
@@ -136,11 +136,20 @@ title = {
 
 	animate : function() {},
 
-	command : function(cmd) {
-		switch(cmd)
+	validCommands : [
+		"enter"
+	],
+
+	command : function(args) {
+		switch(args[0])
 		{
-			case "start":
-				state.set(ingame);
+			case "enter":
+				socket = io.connect(args[1] || "localhost", {
+					forceNew : true
+				});
+				socket.on("connection", function() {
+					state.set(ingame);
+				});
 				return true;
 				break;
 
@@ -162,12 +171,19 @@ var GRID_H = 10
 var TILE_W = 51
 var TILE_H = 51
 
+var tiles = null;
 
 ingame = {
 
 	enter : function() {
+
+		// out with the old...
+		tiles = [];
+
+		// ... in with the new
 		var root = new PIXI.Container();
-		root.position.x = 200;
+		root.position.x = 256;
+		root.position.y = -32;
 
 		var font = {
 			font: "32px monospace", 
@@ -178,6 +194,7 @@ ingame = {
 
 		for(var x = 0; x < GRID_W; x++)
 		{
+			// numbers across the top
 			var text = new PIXI.Text(""+x, font);
 			root.addChild(text);
 			text.position.x = (2 + x)*TILE_W;
@@ -185,20 +202,30 @@ ingame = {
 
 			for(var y = 0; y < GRID_H; y++)
 			{
+				// letters down the left side
+				var letter = String.fromCharCode(65 + y);
 				if(x === 0)
-				{
-					var text = new PIXI.Text(String.fromCharCode(65 + y), font);
+				{	
+					var text = new PIXI.Text(letter, font);
 					root.addChild(text);
-					text.position.x = (1.75 + GRID_W)*TILE_W + 32;
+					text.position.x = 32;
 					text.position.y = (1.85 + y)*TILE_H;
 				}
 
+				// add tile to scene graph
 				var t = new PIXI.Sprite(tile);
 				t.anchor.x = 0.5;
 				t.anchor.y = 0.5;
 				t.position.x = (2.25 + x)*TILE_W;
 				t.position.y = (2.25 + y)*TILE_H;
 				root.addChild(t);
+
+				// memorise tile for game logic
+				tiles[GRID_W*y + x] = {
+					id : letter+x,
+					x : x,
+					y : y
+				};
 			}
 		}
 
@@ -214,10 +241,16 @@ ingame = {
 
 	},
 
-	command : function(cmd) {
-		switch(cmd)
+	validCommands : [
+		"exit"
+	],
+
+	command : function(args) {
+		switch(args[0])
 		{
 			case "exit":
+				socket.disconnect();
+				socket = null;
 				state.set(title);
 				return true;
 				break;
@@ -299,6 +332,16 @@ history.push = function (msg)
 	history.childNodes[history.childNodes.length - 1].innerHTML = msg;
 }
 
+history.clear = function()
+{
+	for(var i = 0; i < history.childNodes.length; i++)
+	{
+		if(typeof history.childNodes[i].innerHTML === undefined)
+			continue;
+		history.childNodes[i].innerHTML = "";
+	}
+}
+
 //
 // Input
 //
@@ -337,26 +380,37 @@ cli.inputCommand = function(cmd)
 	// arguments
 	var args = cmd.split(" ");
 
+	// try to apply command
 	var success;
-
+	var save_to_history = true;
 	switch(args[0])
 	{
 		// global commands
 		case "clear":
 			history.clear();
+			save_to_history = false;
+			success = true;
 			break;
+
+		case "help":
+			history.push("Help - available commands:");
+			for(var i in state.validCommands)
+				history.push(state.validCommands[i]);
+			success = true;
+			break;	
 
 		default:
 			// state-specific commands
-			success = state.command(cmd);
+			if(state.validCommands.indexOf(args[0]) === -1)
+				success = false;
+			else
+				success = state.command(args);
 		break;
 	}
-	
-	history.push(cmd);
+	//if(save_to_history)
+	//	history.push(cmd);
 
-	if(success)
-		socket.emit("cmd", args);
-	else
+	if(!success)
 		history.push("Command not found: " + args[0]);
 }
 
