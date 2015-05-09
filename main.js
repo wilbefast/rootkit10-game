@@ -1,20 +1,56 @@
-var express = require('express'); 
-var app = express();
-var http = require('http').Server(app);
-var io = require('socket.io')(http);
+// ----------------------------------------------------------------------------
+// ROOM MANAGEMENT
+// ----------------------------------------------------------------------------
 
+var rooms = {
+	next_id : 1
+}
+
+var openRoom = null;
+
+function getRoom()
+{
+	if(openRoom)
+	{
+		var room = openRoom;
+		openRoom = null
+		return room;
+	}
+	else
+	{
+		openRoom = {
+			id : rooms.next_id++
+		};
+		rooms[openRoom.id] = openRoom;
+		return openRoom;
+	}
+}
+
+// ----------------------------------------------------------------------------
+// GAME STATE
+// ----------------------------------------------------------------------------
 
 // ------------------------------------
 // Game Objects
 // ------------------------------------
 
-function Egg(tile)
+function Egg(tile, team)
 {
 	this.tile = tile;
 	tile.contents = this;
+	this.team = team;
 	return this;
 }
 Egg.prototype.type = "egg";
+
+function Kitten(tile, team)
+{
+	this.tile = tile;
+	tile.contents = this;
+	this.team = team;
+	return this;
+}
+Kitten.prototype.type = "kitten";
 
 // ------------------------------------
 // Grid
@@ -22,11 +58,6 @@ Egg.prototype.type = "egg";
 
 var GRID_W = 10
 var GRID_H = 10
-
-var unhashTile = function(s)
-{
-	return grid.tileHash[s];
-}
 
 function Grid(w, h)
 {
@@ -55,53 +86,97 @@ function Grid(w, h)
 	}
 	return this;
 }
-var grid = new Grid(GRID_W, GRID_H);
 
+Grid.prototype.unhashTile = function(s)
+{
+	return this.tileHash[s];
+}
+
+
+// ----------------------------------------------------------------------------
+// SERVER
+// ----------------------------------------------------------------------------
+
+var express = require('express'); 
+var app = express();
+var http = require('http').Server(app);
+var io = require('socket.io')(http);
+
+// ------------------------------------
+// Socket.io
+// ------------------------------------
 
 io.on('connection', function(socket){
-  console.log('a user connected');
-
   socket.emit('connection');
 
-  var contents = {};
-  for(var i in grid.tileList)
+  var room = getRoom();
+  if(!room.host)
   {
-  	var t = grid.tileList[i];
-  	if(t.contents)
-  		contents[t.id] = t.contents.type;
-	}
-  socket.emit('grid', {
-  	w : grid.w,
-  	h : grid.h,
-  	contents : contents
-  });
+  	console.log("New player hosting room " + room.id);
+  	// first player is the host
+  	room.host = socket;
+  	room.host.emit('host');
+  }
+  else
+  {
+  	console.log("New player joined room " + room.id);
+  	// second player is the guest
+  	room.guest = socket;
+  	room.guest.emit('guest');
+  	room.host.emit('joined');
+	  // send the grid to all players
+	  room.grid = new Grid(GRID_W, GRID_H);
+	  var data = { w : room.grid.w, h : room.grid.h, contents : {} }
+	  room.guest.emit('grid', data);
+	  room.host.emit('grid', data);
+  }
+  socket.room = room;
 
-  socket.on('cmd', function(cmd) {
-		console.log('cmd', cmd);
-	});
+	socket.on('spawn', function(tile_id) {
+		if(!room.host || !room.guest)
+			return;
 
-	socket.on('spawn', function(hash) {
-		var t = unhashTile(hash);
+		var tile = room.grid.unhashTile(tile_id);
 
-		if(t && !t.contents)
+		if(tile && !tile.contents)
 		{
-			var spawn = new Egg(t);
+			var team = (socket == room.host) ? 0 : 1;
+			var spawn = new Egg(tile, team);
+			var data = {
+				tile_id : tile_id,
+				team : team
+			}
+			room.host.emit('spawn', data);
+			room.guest.emit('spawn', data);
 
-			socket.emit('spawn', hash);
 			setTimeout(function() {
 				if(!spawn.purge)
 				{
-					socket.emit('tile', {
+					spawn.purge = true;
+					spawn = new Kitten(tile, team);
+					var data = {
 						id : spawn.tile.id,
-						contents : spawn.type
-					});
+						team : team,
+						type : spawn.type
+					}
+
+					room.host.emit('hatch', data);
+					room.guest.emit('hatch', data);
 				}
-			}, 3000);
+			}, 7000);
 		}
 	});
 });
 
+// ------------------------------------
+// Express
+// ------------------------------------
+
 app.use(express.static("client"));
+
+// ------------------------------------
+// HTTP
+// ------------------------------------
 
 http.listen(3000, function(){
   console.log('listening on port 3000');

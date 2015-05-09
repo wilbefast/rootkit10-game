@@ -79,37 +79,59 @@ renderer.view.style.position = "absolute";
 // GAME OBJECTS
 // ----------------------------------------------------------------------------
 
+GameObject = {
+	clean : function(tile) {
+		tile.removeChild(tile.contents.sprite);
+		delete tile.contents;
+		tile.contents = null;
+	}
+}
+
 // ------------------------------------
 // Egg
 // ------------------------------------
 
-function Egg(tile)
+function Egg(tile, team)
 {
 	this.tile = tile;
-	this.sprite = new PIXI.Sprite(this.texture);
+	tile.contents = this;
+	this.sprite = new PIXI.Sprite(this.textures[team]);
 	this.sprite.anchor.x = this.sprite.anchor.y = 0.5;
 	tile.addChild(this.sprite);
 	this.sprite.scale.x = this.sprite.scale.y = 2;
 	return this;
 }
-Egg.prototype.texture = PIXI.Texture.fromImage("egg.png");
+Egg.prototype.textures = [
+	PIXI.Texture.fromImage("egg.png"),
+	PIXI.Texture.fromImage("egg_alt.png")
+];
+Egg.prototype.whyCantMove = function()
+{
+	return "Cocoon-phase virus cannot be moved";
+}
 
 // ------------------------------------
 // Kitten
 // ------------------------------------
 
-function Kitten(tile)
+function Kitten(tile, team)
 {
 	this.tile = tile;
-	this.sprite = new PIXI.Sprite(this.texture);
+	tile.contents = this;
+	this.sprite = new PIXI.Sprite(this.textures[team]);
 	this.sprite.anchor.x = this.sprite.anchor.y = 0.5;
 	tile.addChild(this.sprite);
 	this.sprite.scale.x = this.sprite.scale.y = 2;
 	return this;
 }
-Kitten.prototype.texture = PIXI.Texture.fromImage("kitten.png");
-
-
+Kitten.prototype.textures = [
+	PIXI.Texture.fromImage("kitten.png"),
+	PIXI.Texture.fromImage("kitten_alt.png")
+];
+Kitten.prototype.whyCantMove = function()
+{
+	return null;
+}
 // ----------------------------------------------------------------------------
 // GAME STATES
 // ----------------------------------------------------------------------------
@@ -143,7 +165,7 @@ title = {
 	enter : function() {
 		var root = new PIXI.Container();
 
-		var text = new PIXI.Text("R00tK1t10", {
+		var text = new PIXI.Text("Rootkit10", {
 			font: "64px monospace", 
 			fill: "green",
 			align: "center"
@@ -172,6 +194,19 @@ title = {
 					cli.out("Breach - Outer security breached");
 					state.set(ingame);
 				});
+				socket.on("host", function() {
+					cli.out("Breach - Waiting for quarry");
+					ingame.team = 0;
+				});
+				socket.on("guest", function() {
+					cli.out("Breach - Digitial ambush detected");
+					ingame.team = 1;
+				});
+				socket.on("disconnect", function() {
+					socket.disconnect();
+					state.set(title);
+					socket = null;
+				})
 				return null;
 			}
 		}
@@ -205,7 +240,6 @@ ingame = {
 
 		// set up socket.io
 		socket.on("grid", function(g) {
-			console.log(g);
 			// reset the grid to line-up with the server
 			grid = {
 				w : g.w,
@@ -269,10 +303,10 @@ ingame = {
 				// add contents
 				if(g.contents[id])
 				{
-					console.log(g.contents[id]);
 					switch(g.contents[id])
 					{
 						case "kitten":
+							new Kitten(tile);
 							break;
 
 						case "egg":
@@ -287,8 +321,14 @@ ingame = {
 			root.position.y -= root.height*0.5;
 		});
 
-		socket.on("spawn", function(hash) {
-			new Egg(unhashTile(hash));
+		socket.on("spawn", function(data) {
+			new Egg(unhashTile(data.tile_id), data.team);
+		});
+
+		socket.on("hatch", function(data) {
+			var t = unhashTile(data.id);
+			GameObject.clean(t);
+			new Kitten(t, data.team);
 		});
 
 		return root;
@@ -328,6 +368,38 @@ ingame = {
 				}
 				else
 					return "Spawn - Invalid argument: partition";
+			}
+		},
+		"move" : {
+			execute : function(args) {
+				console.log(args);
+				var from = args[1];
+				var to = args[2];
+				if(!from)
+					return "Move - Argument missing: source";
+				var from_tile = unhashTile(from);
+				if(!from_tile)
+					return "Move - Invalid argument: source";
+				if(!from_tile.contents)
+					return "Move - Source partition does not contain and agent";
+				var whyCantMove = from_tile.contents.whyCantMove();
+				if(whyCantMove)
+					return "Move - " + whyCantMove;
+				if(!to)
+					return "Move - Argument missing: destination";
+				var to_tile = unhashTile(to);
+				if(!to_tile)
+					return "Move - Invalid argument: destination";
+				if(to_tile == from_tile)
+					return "Move - Source and destination are identical";
+				if(to_tile.grid_x != from_tile.grid_x && to_tile.grid_y != from_tile.grid_y)
+					return "Move - Must be horizontal or diagonal";
+				if(to_tile.contents)
+					return "Move - destination partition is " + to_tile.id + " is not free";
+
+				cli.out("Move - Moving agent from " + from_tile.id + " to " + to_tile.id);
+				socket.emit("move", from_tile.id, to_tile.id);
+				return null;
 			}
 		}
 	},
@@ -374,8 +446,9 @@ var h = window.innerHeight;
 
 function resize()
 {	
-	var w = window.innerWidth;
-	var h = window.innerHeight;
+
+	w = window.innerWidth;
+	h = window.innerHeight;
 	renderer.resize(w, h);
 	stage.filterArea = new PIXI.math.Rectangle(0, 0, w, h);
 	var scale = Math.min(w/DEFAULT_W, h/DEFAULT_H);
@@ -479,7 +552,7 @@ cli.inputCommand = function(cmd)
 			break;
 
 		case "help":
-			cli.out("Help - available commands:");
+			cli.out("Help - Available commands:");
 			for(var i in state.commands)
 				cli.out(i);
 			success = true;
@@ -489,12 +562,12 @@ cli.inputCommand = function(cmd)
 			// state-specific commands
 			var implementation = state.commands[args[0]];
 			if(!implementation)
-				cli.out("Command not found: " + args[0]);
+				cli.out("ERROR! Command not found: " + args[0]);
 			else
 			{
 				var error = implementation.execute(args);
 				if(error)
-					cli.out(error);
+					cli.out("ERROR! " + error);
 			}
 		break;
 	}
