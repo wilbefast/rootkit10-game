@@ -13,14 +13,14 @@
 				outline: none;
 				border: none;
 				outline: none;
-				font-size: 32;
+				font-size: 24;
 				font-family: monospace; 
 			}
 			canvas { 
 				width: 100%; 
 				height: 100% 
 			}
-			#history > div {
+			#output > div {
 				min-height: 32px;
 			}
 		</style>
@@ -30,7 +30,7 @@
 
 	<div style="position: absolute; bottom: 0; width: 50%; 
 	z-index: 1; overflow: hidden">
-		<div id="history" >
+		<div id="output" >
 		</div>
 		<div>
 			<div style="display:inline-block">></div>
@@ -67,17 +67,13 @@ renderer = PIXI.autoDetectRenderer(window.innerWidth, window.innerHeight, {
 	backgroundColor : 0x000000
 });
 
-stage = new PIXI.Stage(0xFFFFFF);
-bloom = new PIXI.filters.BloomFilter();
+stage = new PIXI.Container();
  
 // set the filter
-stage.filters = [ bloom ];
+stage.filters = [ new PIXI.filters.BloomFilter() ];
 renderer.view.style["transform"] = "translatez(0)";
 document.body.appendChild(renderer.view);
 renderer.view.style.position = "absolute";
-
-var scaleNode = new PIXI.Container();
-stage.addChild(scaleNode);
 
 // ----------------------------------------------------------------------------
 // GAME OBJECTS
@@ -132,9 +128,9 @@ var statePrototype = {
 		if(state)
 		{
 			state.exit();
-			scaleNode.removeChildren();
+			stage.removeChildren();
 		}
-		scaleNode.addChild(newState.enter());
+		stage.addChild(newState.enter());
 		state = newState;
 	}
 }
@@ -163,15 +159,17 @@ title = {
 	animate : function() {},
 
 	commands : {
-		"enter" : {
+		"breach" : {
 			execute : function(args) {
-				var server = (args[1] || "localhost");
-				history.push("Enter - Connecting to server " + server);
-				socket = io.connect(server, {
+				if(!args[1])
+					return "Breach - Argument missing: attack target";
+
+				cli.out("Breach - Commencing attack on " + args[1]);
+				socket = io.connect(args[1], {
 					forceNew : true
 				});
 				socket.on("connection", function() {
-					history.push("Enter - Connection established");
+					cli.out("Breach - Outer security breached");
 					state.set(ingame);
 				});
 				return null;
@@ -186,8 +184,6 @@ statePrototype.set(title);
 // In-game state
 // ------------------------------------
 
-var GRID_W = 10
-var GRID_H = 10
 var TILE_W = 51
 var TILE_H = 51
 
@@ -202,35 +198,47 @@ ingame = {
 
 	enter : function() {
 
-		// out with the old...
-		grid = {};
-		grid.tileList = [];
-		grid.tileHash = {};
-
-		// ... in with the new
+		// create scene-graph object
 		var root = new PIXI.Container();
 		root.position.x = 256;
 		root.position.y = -32;
 
-		var font = {
-			font: "32px monospace", 
-			fill: "green",
-			align: "center"
-		};
-		var background = PIXI.Texture.fromImage("tile.png");
+		// set up socket.io
+		socket.on("grid", function(g) {
+			console.log(g);
+			// reset the grid to line-up with the server
+			grid = {
+				w : g.w,
+				h : g.h
+			};
+			grid.tileList = [];
+			grid.tileHash = {};
 
-		for(var x = 0; x < GRID_W; x++)
-		{
-			// numbers across the top
-			var text = new PIXI.Text(""+x, font);
-			root.addChild(text);
-			text.position.x = (2 + x)*TILE_W;
-			text.position.y = 32;
+			// cache graphic assets
+			var font = {
+				font: "32px monospace", 
+				fill: "green",
+				align: "center"
+			};
+			var background = PIXI.Texture.fromImage("tile.png");
 
-			for(var y = 0; y < GRID_H; y++)
+			for(var x = 0; x < grid.w; x++)
+			for(var y = 0; y < grid.h; y++)
 			{
-				// letters down the left side
+				// calculate identifier
 				var letter = String.fromCharCode(65 + y);
+				var id = letter + x;
+
+				// numbers across the top
+				if(y === 0)
+				{
+					var text = new PIXI.Text(""+x, font);
+					root.addChild(text);
+					text.position.x = (2 + x)*TILE_W;
+					text.position.y = 32;
+				}
+
+				// letters down the left side
 				if(x === 0)
 				{	
 					var text = new PIXI.Text(letter, font);
@@ -245,25 +253,43 @@ ingame = {
 				tile.position.y = (2.25 + y)*TILE_H;
 				root.addChild(tile);
 
+				// replace the server's logical tile with our graphical one
+				tile.id = id;
+				tile.grid_x = x;
+				tile.grid_y = y;
+				grid.tileList[i] = tile;
+				grid.tileHash[tile.id] = tile;		
+
 				// add background
 				var b = new PIXI.Sprite(background)
 				tile.addChild(b);
 				b.anchor.x = 0.5;
 				b.anchor.y = 0.5;
 
-				// memorise tile information for game logic
-				tile.id = letter+x;
-				tile.grid_x = x;
-				tile.grid_y = y;
+				// add contents
+				if(g.contents[id])
+				{
+					console.log(g.contents[id]);
+					switch(g.contents[id])
+					{
+						case "kitten":
+							break;
 
-				// save the tile in look-up tables
-				grid.tileList[GRID_W*y + x] = tile;
-				grid.tileHash[tile.id] = tile; 
+						case "egg":
+							new Egg(tile);
+							break;
+					}
+				}
 			}
-		}
 
-		root.position.x -= root.width*0.5;
-		root.position.y -= root.height*0.5;
+			// position the grid
+			root.position.x -= root.width*0.5;
+			root.position.y -= root.height*0.5;
+		});
+
+		socket.on("spawn", function(hash) {
+			new Egg(unhashTile(hash));
+		});
 
 		return root;
 	},
@@ -280,28 +306,28 @@ ingame = {
 					socket.disconnect();
 					socket = null;
 					state.set(title);
-					history.push("Exit - Disconnected");
+					cli.out("Exit - Disconnected");
 					return null;
 			}
 		},
 		"spawn" : {
 			execute : function(args) {
 				if(!args[1])
-					return "Spawn - missing position argument";
+					return "Spawn - Argument missing: partition";
 				var t = unhashTile(args[1])
 				if(t)
 				{
 					if(t.children.length > 1)
-						return "Spawn - obstruction at position " + t.id;
+						return "Spawn - Partition " + t.id + " is not free";
 					else
 					{
-						new Egg(t);
-						history.push("Spawn - successful at position " + t.id);
+						cli.out("Spawn - Infecting partition " + t.id)
+						socket.emit("spawn", t.id);
 						return null;
 					}
 				}
 				else
-					return "Spawn - invalid position argument";
+					return "Spawn - Invalid argument: partition";
 			}
 		}
 	},
@@ -353,9 +379,9 @@ function resize()
 	renderer.resize(w, h);
 	stage.filterArea = new PIXI.math.Rectangle(0, 0, w, h);
 	var scale = Math.min(w/DEFAULT_W, h/DEFAULT_H);
-	scaleNode.scale.x = scaleNode.scale.y = scale;
-	scaleNode.position.x = w/2;
-	scaleNode.position.y = h/2;
+	stage.scale.x = stage.scale.y = scale;
+	stage.position.x = w/2;
+	stage.position.y = h/2;
 }
 resize();
 
@@ -367,37 +393,39 @@ window.onresize = function(e) {
 // User input
 // ------------------------------------
 
+var cli = document.getElementById('cli');
+
 //
-// History
+// Output
 //
 
-var HISTORY_LENGTH = 30;
-var history = document.getElementById('history');
-for(var i = 0; i < HISTORY_LENGTH; i++)
+var OUTPUT_LENGTH = 30;
+var output = document.getElementById('output');
+for(var i = 0; i < OUTPUT_LENGTH; i++)
 {
 	var d = document.createElement('div'); 
 	d.innerHTML = "";
-	history.appendChild(d);
+	output.appendChild(d);
 }
 
-history.push = function (msg)
+cli.out = function (msg)
 {
-	for(var i = 1; i < history.childNodes.length; i++)
+	for(var i = 1; i < output.childNodes.length; i++)
 	{
-		if(typeof history.childNodes[i].innerHTML === undefined)
+		if(typeof output.childNodes[i].innerHTML === undefined)
 			continue;
-		history.childNodes[i - 1].innerHTML = history.childNodes[i].innerHTML;
+		output.childNodes[i - 1].innerHTML = output.childNodes[i].innerHTML;
 	}
-	history.childNodes[history.childNodes.length - 1].innerHTML = msg;
+	output.childNodes[output.childNodes.length - 1].innerHTML = msg;
 }
 
-history.clear = function()
+cli.clear = function()
 {
-	for(var i = 0; i < history.childNodes.length; i++)
+	for(var i = 0; i < output.childNodes.length; i++)
 	{
-		if(typeof history.childNodes[i].innerHTML === undefined)
+		if(typeof output.childNodes[i].innerHTML === undefined)
 			continue;
-		history.childNodes[i].innerHTML = "";
+		output.childNodes[i].innerHTML = "";
 	}
 }
 
@@ -405,7 +433,6 @@ history.clear = function()
 // Input
 //
 
-var cli = document.getElementById('cli');
 cli.onkeydown = function(e) {
 	e = (e || window.event)
 	switch(e.keyCode || e.which)
@@ -432,7 +459,7 @@ cli.inputCommand = function(cmd)
 	// space
 	if(!cmd)
 	{
-		history.push("");
+		cli.out("");
 		return;
 	}
 
@@ -441,20 +468,20 @@ cli.inputCommand = function(cmd)
 
 	// try to apply command
 	var success;
-	var save_to_history = true;
+	var save_to_output = true;
 	switch(args[0])
 	{
 		// global commands
 		case "clear":
-			history.clear();
-			save_to_history = false;
+			cli.clear();
+			save_to_output = false;
 			success = true;
 			break;
 
 		case "help":
-			history.push("Help - available commands:");
+			cli.out("Help - available commands:");
 			for(var i in state.commands)
-				history.push(i);
+				cli.out(i);
 			success = true;
 			break;	
 
@@ -462,12 +489,12 @@ cli.inputCommand = function(cmd)
 			// state-specific commands
 			var implementation = state.commands[args[0]];
 			if(!implementation)
-				history.push("Command not found: " + args[0]);
+				cli.out("Command not found: " + args[0]);
 			else
 			{
 				var error = implementation.execute(args);
 				if(error)
-					history.push(error);
+					cli.out(error);
 			}
 		break;
 	}
