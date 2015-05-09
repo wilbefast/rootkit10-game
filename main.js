@@ -42,15 +42,28 @@ function Egg(tile, team)
 	return this;
 }
 Egg.prototype.type = "egg";
+Egg.prototype.canMove = function() {
+	return false;
+}
 
 function Kitten(tile, team)
 {
 	this.tile = tile;
 	tile.contents = this;
 	this.team = team;
+	this.asleep = false;
 	return this;
 }
 Kitten.prototype.type = "kitten";
+Kitten.prototype.canMove = function() {
+	return !this.asleep;
+}
+Kitten.prototype.moveTo = function(tile) {
+	this.tile.contents = null;
+	this.tile = tile;
+	tile.contents = this;
+	asleep = true;
+}
 
 // ------------------------------------
 // Grid
@@ -116,6 +129,7 @@ io.on('connection', function(socket){
   	// first player is the host
   	room.host = socket;
   	room.host.emit('host');
+  	room.host.team = 0;
   }
   else
   {
@@ -123,7 +137,10 @@ io.on('connection', function(socket){
   	// second player is the guest
   	room.guest = socket;
   	room.guest.emit('guest');
+  	room.guest.team = 1;
   	room.host.emit('joined');
+  	room.guest.other = room.host;
+  	room.host.other = room.guest;
 	  // send the grid to all players
 	  room.grid = new Grid(GRID_W, GRID_H);
 	  var data = { w : room.grid.w, h : room.grid.h, contents : {} }
@@ -131,6 +148,39 @@ io.on('connection', function(socket){
 	  room.host.emit('grid', data);
   }
   socket.room = room;
+
+  socket.on('say', function(msg) {
+  	if(socket.other)
+  		socket.other.emit('say', msg);
+  });
+
+  socket.on('move', function(data) {
+  	var from_tile = room.grid.unhashTile(data.from_id);
+  	var to_tile = room.grid.unhashTile(data.to_id);
+  	if(!from_tile || !to_tile)
+  		return;
+
+  	var mover = from_tile.contents;
+
+  	if(mover 
+  		&& !to_tile.contents 
+  		&& (mover.team === socket.team)
+  		&& mover.canMove(to_tile))
+  	{
+  		mover.moveTo(to_tile);
+  		setTimeout(function() {
+  			if(!mover.purge)
+  			{
+  				mover.asleep = false;
+  				socket.emit('awaken', mover.tile.id);
+  				socket.other.emit('awaken', mover.tile.id);
+  			}
+  		}, 7000)
+  		socket.emit('move', data);
+  		socket.other.emit('move', data);
+  	}
+
+  });
 
 	socket.on('spawn', function(tile_id) {
 		if(!room.host || !room.guest)
@@ -140,7 +190,7 @@ io.on('connection', function(socket){
 
 		if(tile && !tile.contents)
 		{
-			var team = (socket == room.host) ? 0 : 1;
+			var team = socket.team;
 			var spawn = new Egg(tile, team);
 			var data = {
 				tile_id : tile_id,

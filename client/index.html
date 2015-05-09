@@ -4,6 +4,7 @@
 		<meta name="description" content="A real-time strategy game about hacking">
 		<meta name="keywords" content="Cyberpunk,Hacking,Hacker,Game,RTS">
 		<meta name="author" content="William Dyce">
+		<link rel="shortcut icon" href="favicon.ico" />
 		<style>
 			* { 
 				margin: 0; 
@@ -95,6 +96,7 @@ function Egg(tile, team)
 {
 	this.tile = tile;
 	tile.contents = this;
+	this.team = team;
 	this.sprite = new PIXI.Sprite(this.textures[team]);
 	this.sprite.anchor.x = this.sprite.anchor.y = 0.5;
 	tile.addChild(this.sprite);
@@ -118,22 +120,50 @@ function Kitten(tile, team)
 {
 	this.tile = tile;
 	tile.contents = this;
-	this.sprite = new PIXI.Sprite(this.textures[team]);
+	this.team = team;
+	this.sprite = new PIXI.Sprite(this.textures.awake[team]);
 	this.sprite.anchor.x = this.sprite.anchor.y = 0.5;
-	tile.addChild(this.sprite);
 	this.sprite.scale.x = this.sprite.scale.y = 2;
+	tile.addChild(this.sprite);
 	return this;
 }
-Kitten.prototype.textures = [
-	PIXI.Texture.fromImage("kitten.png"),
-	PIXI.Texture.fromImage("kitten_alt.png")
-];
+Kitten.prototype.textures = {
+	awake:	[
+		PIXI.Texture.fromImage("kitten.png"),
+		PIXI.Texture.fromImage("kitten_alt.png")
+	],
+	asleep : [
+		PIXI.Texture.fromImage("kitten_asleep.png"),
+		PIXI.Texture.fromImage("kitten_asleep_alt.png")
+	]
+};
 Kitten.prototype.whyCantMove = function()
 {
 	if(this.team !== ingame.team)
 		return "Enemy agents cannot be controlled";
+	if(this.asleep)
+		return "Agent must rest before moving again";
 	return null;
 }
+Kitten.prototype.moveTo = function(tile)
+{
+	this.tile.removeChild(this.sprite);
+	this.tile.contents = null;
+	this.tile = tile;
+	this.setAsleep(true);
+	tile.contents = this;
+	tile.addChild(this.sprite);
+	return this;
+}
+Kitten.prototype.setAsleep = function(v)
+{
+	this.asleep = v;
+	if(v)
+		this.sprite.texture = this.textures.asleep[this.team];
+	else
+		this.sprite.texture = this.textures.awake[this.team];
+}
+
 // ----------------------------------------------------------------------------
 // GAME STATES
 // ----------------------------------------------------------------------------
@@ -185,11 +215,9 @@ title = {
 	commands : {
 		"breach" : {
 			execute : function(args) {
-				if(!args[1])
-					return "Breach - Argument missing: attack target";
-
-				cli.out("Breach - Commencing attack on " + args[1]);
-				socket = io.connect(args[1], {
+				var server = (args[1] || window.location.hostname);
+				cli.out("Breach - Commencing attack on " + server);
+				socket = io.connect(server, {
 					forceNew : true
 				});
 				socket.on("connection", function() {
@@ -199,6 +227,9 @@ title = {
 				socket.on("host", function() {
 					cli.out("Breach - Waiting for quarry");
 					ingame.team = 0;
+				});
+				socket.on("joined", function() {
+					cli.out("Breach - Springing trap");
 				});
 				socket.on("guest", function() {
 					cli.out("Breach - Digitial ambush detected");
@@ -331,6 +362,25 @@ ingame = {
 			new Egg(unhashTile(data.tile_id), data.team);
 		});
 
+		socket.on("move", function(data) {
+			unhashTile(data.from_id).contents.moveTo(unhashTile(data.to_id));
+		});
+
+		socket.on("awaken", function(tile_id) {
+			console.log(tile_id);
+			unhashTile(tile_id).contents.setAsleep(false);
+		});
+
+		socket.on("say", function(msg) {
+			cli.out("ENEMY: " + msg);
+		});
+
+		socket.on("hatch", function(data) {
+			var t = unhashTile(data.id);
+			GameObject.clean(t);
+			new Kitten(t, data.team);
+		});
+
 		socket.on("hatch", function(data) {
 			var t = unhashTile(data.id);
 			GameObject.clean(t);
@@ -359,6 +409,21 @@ ingame = {
 				return "Cut your connection with this server";
 			}
 		},
+		"say" : {
+			execute : function(args) {
+				if(!args[1])
+					return "Say - Argument missing: message";
+				var msg = args[1];
+				for(var i = 2; i < args.length; i++)
+					msg += " "+args[i];
+				cli.out("YOU: " + msg);
+				socket.emit("say", msg);
+				return null;
+			},
+			help : function() {
+				return "User 'say [message]' to send messages to your opponent";
+			}
+		},
 		"spawn" : {
 			execute : function(args) {
 				if(!args[1])
@@ -379,12 +444,11 @@ ingame = {
 					return "Spawn - Invalid argument: partition";
 			},
 			help : function() {
-				return "Use 'spawn [grid reference]' to create a viral agent";
+				return "Use 'spawn [partition]' to create a viral agent";
 			}
 		},
 		"move" : {
 			execute : function(args) {
-				console.log(args);
 				var from = args[1];
 				var to = args[2];
 				if(!from)
@@ -410,7 +474,10 @@ ingame = {
 					return "Move - destination partition is " + to_tile.id + " is not free";
 
 				cli.out("Move - Moving agent from " + from_tile.id + " to " + to_tile.id);
-				socket.emit("move", from_tile.id, to_tile.id);
+				socket.emit("move", { 
+					from_id : from_tile.id, 
+					to_id : to_tile.id 
+				});
 				return null;
 			},
 
@@ -572,7 +639,7 @@ cli.tryAutocomplete = function(args)
 		var result = "";
 		for(var i = 0; i < args.length - 2; i++)
 			result += args[i];
-		result = result + completion;
+		result = result + completion + " ";
 		return result;
 	}
 }
