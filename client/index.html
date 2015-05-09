@@ -555,12 +555,36 @@ cli.commands = {
 	}
 }
 
+cli.tryAutocomplete = function(args)
+{
+	var part = args[args.length - 1];
+	if(part === "")
+		return;
+
+	function complete(commands) {
+		for(var c in commands)
+			if(c.indexOf(part) === 0)
+				return c;
+	}
+	var completion = (complete(state.commands) || complete(cli.commands));
+	if(completion)
+	{
+		var result = "";
+		for(var i = 0; i < args.length - 2; i++)
+			result += args[i];
+		result = result + completion;
+		return result;
+	}
+}
+
 cli.onkeydown = function(e) {
 	e = (e || window.event)
 	switch(e.keyCode || e.which)
 	{
 		case 9: // tab
-			cli.value = cli.autocomplete(cli.value);
+			var auto = cli.tryAutocomplete(cli.value.split(" "));
+			if(auto)
+				cli.value = auto;
 			return false;
 
 		case 13: // return
@@ -587,12 +611,6 @@ cli.onkeydown = function(e) {
 			}
 			return false;
 	}
-}
-
-
-cli.autocomplete = function(cmd)
-{
-	return "Hello World!";
 }
 
 cli.inputCommand = function(cmd)
