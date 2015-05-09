@@ -1,0 +1,9 @@
+{
+  "name": "rootkit10",
+  "description": "Server for the real-time strategy game Rootkit10",
+  "version": "0.0.1",
+  "dependencies": {
+    "express": "^4.12.3",
+    "socket.io": "^1.3.5"
+  }
+}

@@ -1,0 +1,224 @@
+<html>
+<head>
+		<title>Rootkit10</title>
+		<meta name="description" content="A real-time strategy game about hacking">
+		<meta name="keywords" content="Cyberpunk,Hacking,Hacker,Game,RTS">
+		<meta name="author" content="William Dyce">
+		<style>
+			* { 
+				margin: 0; 
+				background-color : transparent;
+				border: none;
+				color: green;
+				outline: none;
+				border: none;
+				outline: none;
+				font-size: 32;
+				font-family: monospace; 
+			}
+			canvas { 
+				width: 100%; 
+				height: 100% 
+			}
+		</style>
+    <script src="pixi.js"></script>
+</head>
+<body>
+
+	<div style="position: absolute; bottom: 0; width: 100%; z-index: 1">
+		<div id="history" >
+		</div>
+		<div>
+			<div style="display:inline-block">></div>
+			<div style="display:inline-block">
+				<input type="text" id="cli" onblur="this.focus()" 
+					spellcheck="false" autofocus>
+				</input>
+			</div>
+		</div>
+	</div>
+
+
+	<script src="https://cdn.socket.io/socket.io-1.2.0.js"></script>
+
+  <script>
+ 
+
+window.onload = function() {
+
+// ----------------------------------------------------------------------------
+// SET UP SOCKET.IO
+// ----------------------------------------------------------------------------
+
+ var socket = io();
+
+// ----------------------------------------------------------------------------
+// SET UP PIXI.JS
+// ----------------------------------------------------------------------------
+
+renderer = PIXI.autoDetectRenderer(window.innerWidth, window.innerHeight, {
+	backgroundColor : 0x000000
+});
+stage = new PIXI.Stage(0xFFFFFF);
+bloom = new PIXI.filters.BloomFilter();
+stage.filters = [ bloom ];
+renderer.view.style["transform"] = "translatez(0)";
+document.body.appendChild(renderer.view);
+renderer.view.style.position = "absolute";
+
+var texture = PIXI.Texture.fromImage("kitten.png");
+var bunny = new PIXI.Sprite(texture);
+bunny.anchor.x = 0.5;
+bunny.anchor.y = 0.5;
+bunny.position.x = 200;
+bunny.position.y = 150;
+stage.addChild(bunny);
+
+
+// ----------------------------------------------------------------------------
+// GAME STATE
+// ----------------------------------------------------------------------------
+
+var GRID_W = 10
+var GRID_H = 10
+var TILE_W = 51
+var TILE_H = 51
+
+var state = {
+
+	enter : function() {
+
+		var font = {
+			font: "32px monospace", 
+			fill: "green",
+			align: "center"
+		};
+		var tile = PIXI.Texture.fromImage("tile.png");
+
+		for(var x = 0; x < GRID_W; x++)
+		{
+			var text = new PIXI.Text(""+x, font);
+			stage.addChild(text);
+			text.position.x = (2 + x)*TILE_W;
+			text.position.y = 32;
+
+			for(var y = 0; y < GRID_H; y++)
+			{
+				if(x === 0)
+				{
+					var text = new PIXI.Text(String.fromCharCode(65 + y), font);
+					stage.addChild(text);
+					text.position.x = (1.75 + GRID_W)*TILE_W + 32;
+					text.position.y = (1.85 + y)*TILE_H;
+				}
+
+				var t = new PIXI.Sprite(tile);
+				t.anchor.x = 0.5;
+				t.anchor.y = 0.5;
+				t.position.x = (2.25 + x)*TILE_W;
+				t.position.y = (2.25 + y)*TILE_H;
+				stage.addChild(t);
+
+
+			}
+		}
+
+	},
+
+	animate : function() {
+
+	}
+}
+state.enter();
+
+function animate()
+{
+	state.animate();
+	renderer.render(stage);
+	requestAnimationFrame(animate);
+}	
+animate();
+
+
+// ----------------------------------------------------------------------------
+// DOM
+// ----------------------------------------------------------------------------
+
+// ------------------------------------
+// Resolution changes
+// ------------------------------------
+
+function resize()
+{	
+	var w = window.innerWidth;
+	var h = window.innerHeight;
+	renderer.resize(w, h);
+	stage.filterArea = new PIXI.math.Rectangle(0, 0, w, h);
+}
+resize();
+
+window.onresize = function(e) {
+	resize();
+}
+
+// ------------------------------------
+// User input
+// ------------------------------------
+
+
+var HISTORY_LENGTH = 10;
+var history = document.getElementById('history');
+for(var i = 0; i < HISTORY_LENGTH; i++)
+{
+	var d = document.createElement('div'); 
+	d.innerHTML = "";
+	history.appendChild(d);
+}
+
+history_push = function (msg)
+{
+	for(var i = 1; i < history.childNodes.length; i++)
+	{
+		if(!history.childNodes[i].innerHTML)
+			continue;
+		history.childNodes[i - 1].innerHTML = history.childNodes[i].innerHTML;
+	}
+	history.childNodes[history.childNodes.length - 1].innerHTML = msg;
+}
+
+
+function autocomplete(cmd)
+{
+	return "Hello World!";
+}
+
+function command(cmd)
+{
+	console.log(cmd);
+	socket.emit("cmd", cmd);
+	history_push(cmd);
+}
+
+var cli = document.getElementById('cli');
+cli.onkeydown = function(e) {
+	e = (e || window.event)
+	switch(e.keyCode || e.which)
+	{
+		case 9:
+			cli.value = autocomplete(cli.value);
+			return false;
+
+		case 13:
+			command(cli.value);
+			cli.value = "";
+			return false;
+	}
+}
+
+
+} // window.onload
+
+    </script>
+ 
+    </body>
+</html>
