@@ -66,6 +66,7 @@ var DEFAULT_H = 720
 renderer = PIXI.autoDetectRenderer(window.innerWidth, window.innerHeight, {
 	backgroundColor : 0x000000
 });
+
 stage = new PIXI.Stage(0xFFFFFF);
 bloom = new PIXI.filters.BloomFilter();
  
@@ -78,15 +79,40 @@ renderer.view.style.position = "absolute";
 var scaleNode = new PIXI.Container();
 stage.addChild(scaleNode);
 
-/*
-var texture = PIXI.Texture.fromImage("kitten.png");
-var bunny = new PIXI.Sprite(texture);
-bunny.anchor.x = 0.5;
-bunny.anchor.y = 0.5;
-bunny.position.x = 200;
-bunny.position.y = 150;
-scaleNode.addChild(bunny);
-*/
+// ----------------------------------------------------------------------------
+// GAME OBJECTS
+// ----------------------------------------------------------------------------
+
+// ------------------------------------
+// Egg
+// ------------------------------------
+
+function Egg(tile)
+{
+	this.tile = tile;
+	this.sprite = new PIXI.Sprite(this.texture);
+	this.sprite.anchor.x = this.sprite.anchor.y = 0.5;
+	tile.addChild(this.sprite);
+	this.sprite.scale.x = this.sprite.scale.y = 2;
+	return this;
+}
+Egg.prototype.texture = PIXI.Texture.fromImage("egg.png");
+
+// ------------------------------------
+// Kitten
+// ------------------------------------
+
+function Kitten(tile)
+{
+	this.tile = tile;
+	this.sprite = new PIXI.Sprite(this.texture);
+	this.sprite.anchor.x = this.sprite.anchor.y = 0.5;
+	tile.addChild(this.sprite);
+	this.sprite.scale.x = this.sprite.scale.y = 2;
+	return this;
+}
+Kitten.prototype.texture = PIXI.Texture.fromImage("kitten.png");
+
 
 // ----------------------------------------------------------------------------
 // GAME STATES
@@ -136,26 +162,20 @@ title = {
 
 	animate : function() {},
 
-	validCommands : [
-		"enter"
-	],
-
-	command : function(args) {
-		switch(args[0])
-		{
-			case "enter":
-				socket = io.connect(args[1] || "localhost", {
+	commands : {
+		"enter" : {
+			execute : function(args) {
+				var server = (args[1] || "localhost");
+				history.push("Enter - Connecting to server " + server);
+				socket = io.connect(server, {
 					forceNew : true
 				});
 				socket.on("connection", function() {
+					history.push("Enter - Connection established");
 					state.set(ingame);
 				});
-				return true;
-				break;
-
-			default:
-				return false;
-				break;
+				return null;
+			}
 		}
 	}
 }
@@ -171,14 +191,21 @@ var GRID_H = 10
 var TILE_W = 51
 var TILE_H = 51
 
-var tiles = null;
+var grid = null
+
+var unhashTile = function(s)
+{
+	return grid.tileHash[s];
+}
 
 ingame = {
 
 	enter : function() {
 
 		// out with the old...
-		tiles = [];
+		grid = {};
+		grid.tileList = [];
+		grid.tileHash = {};
 
 		// ... in with the new
 		var root = new PIXI.Container();
@@ -190,7 +217,7 @@ ingame = {
 			fill: "green",
 			align: "center"
 		};
-		var tile = PIXI.Texture.fromImage("tile.png");
+		var background = PIXI.Texture.fromImage("tile.png");
 
 		for(var x = 0; x < GRID_W; x++)
 		{
@@ -213,19 +240,25 @@ ingame = {
 				}
 
 				// add tile to scene graph
-				var t = new PIXI.Sprite(tile);
-				t.anchor.x = 0.5;
-				t.anchor.y = 0.5;
-				t.position.x = (2.25 + x)*TILE_W;
-				t.position.y = (2.25 + y)*TILE_H;
-				root.addChild(t);
+				var tile = new PIXI.Container();
+				tile.position.x = (2.25 + x)*TILE_W;
+				tile.position.y = (2.25 + y)*TILE_H;
+				root.addChild(tile);
 
-				// memorise tile for game logic
-				tiles[GRID_W*y + x] = {
-					id : letter+x,
-					x : x,
-					y : y
-				};
+				// add background
+				var b = new PIXI.Sprite(background)
+				tile.addChild(b);
+				b.anchor.x = 0.5;
+				b.anchor.y = 0.5;
+
+				// memorise tile information for game logic
+				tile.id = letter+x;
+				tile.grid_x = x;
+				tile.grid_y = y;
+
+				// save the tile in look-up tables
+				grid.tileList[GRID_W*y + x] = tile;
+				grid.tileHash[tile.id] = tile; 
 			}
 		}
 
@@ -241,23 +274,49 @@ ingame = {
 
 	},
 
-	validCommands : [
-		"exit"
-	],
+	commands : {
+		"exit" : {
+			execute : function(args) {
+					socket.disconnect();
+					socket = null;
+					state.set(title);
+					history.push("Exit - Disconnected");
+					return null;
+			}
+		},
+		"spawn" : {
+			execute : function(args) {
+				if(!args[1])
+					return "Spawn - missing position argument";
+				var t = unhashTile(args[1])
+				if(t)
+				{
+					if(t.children.length > 1)
+						return "Spawn - obstruction at position " + t.id;
+					else
+					{
+						new Egg(t);
+						history.push("Spawn - successful at position " + t.id);
+						return null;
+					}
+				}
+				else
+					return "Spawn - invalid position argument";
+			}
+		}
+	},
 
-	command : function(args) {
-		switch(args[0])
-		{
-			case "exit":
-				socket.disconnect();
-				socket = null;
-				state.set(title);
-				return true;
-				break;
+	command : {
+		execute : function(args) {
+			switch(args[0])
+			{
+				case "exit":
 
-			default:
-				return false;
-				break;
+					break;
+
+				case "spawn":
+
+			}
 		}
 	}
 }
@@ -394,24 +453,25 @@ cli.inputCommand = function(cmd)
 
 		case "help":
 			history.push("Help - available commands:");
-			for(var i in state.validCommands)
-				history.push(state.validCommands[i]);
+			for(var i in state.commands)
+				history.push(i);
 			success = true;
 			break;	
 
 		default:
 			// state-specific commands
-			if(state.validCommands.indexOf(args[0]) === -1)
-				success = false;
+			var implementation = state.commands[args[0]];
+			if(!implementation)
+				history.push("Command not found: " + args[0]);
 			else
-				success = state.command(args);
+			{
+				var error = implementation.execute(args);
+				if(error)
+					history.push(error);
+			}
 		break;
 	}
-	//if(save_to_history)
-	//	history.push(cmd);
-
-	if(!success)
-		history.push("Command not found: " + args[0]);
+		
 }
 
 } // window.onload
