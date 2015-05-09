@@ -210,6 +210,10 @@ title = {
 					socket = null;
 				})
 				return null;
+			},
+
+			help : function() {
+				return "Use 'breach [address]' to hack into a server";
 			}
 		}
 	}
@@ -350,6 +354,9 @@ ingame = {
 					state.set(title);
 					cli.out("Exit - Disconnected");
 					return null;
+			},
+			help : function() {
+				return "Cut your connection with this server";
 			}
 		},
 		"spawn" : {
@@ -370,6 +377,9 @@ ingame = {
 				}
 				else
 					return "Spawn - Invalid argument: partition";
+			},
+			help : function() {
+				return "Use 'spawn [grid reference]' to create a viral agent";
 			}
 		},
 		"move" : {
@@ -402,20 +412,10 @@ ingame = {
 				cli.out("Move - Moving agent from " + from_tile.id + " to " + to_tile.id);
 				socket.emit("move", from_tile.id, to_tile.id);
 				return null;
-			}
-		}
-	},
+			},
 
-	command : {
-		execute : function(args) {
-			switch(args[0])
-			{
-				case "exit":
-
-					break;
-
-				case "spawn":
-
+			help : function() {
+				return "Use 'move [A] [B]' to order the agent on A to move to B";
 			}
 		}
 	}
@@ -518,6 +518,43 @@ for(var i = 0; i < HISTORY_LENGTH; i++)
 // Input
 //
 
+cli.commands = {
+	"help" : {
+		execute : function(args) {
+			if(args[1])
+			{
+				var implementation = (cli.commands[args[1]] || state.commands[args[1]]);
+				if(!implementation)
+					return "Help - Command not found " + args[1];
+				else if(!implementation.help)
+					return "Help - Not available for command " + args[1];
+				else
+					cli.out("Help - " + implementation.help(args));
+			}
+			else
+			{
+				cli.out("Help - Available commands:");
+				for(var i in state.commands)
+					cli.out(i);
+				success = true;
+			}
+		},
+		help : function() {
+			return "Enter 'help [command]' to learn about commands";
+		}
+	},
+	"clear" : {
+		execute : function() {
+			cli.clear();
+			save_to_output = false;
+			success = true;
+		},
+		help : function() {
+			return "Used to clear the console of previous output";
+		}
+	}
+}
+
 cli.onkeydown = function(e) {
 	e = (e || window.event)
 	switch(e.keyCode || e.which)
@@ -573,36 +610,20 @@ cli.inputCommand = function(cmd)
 	// try to apply command
 	var success;
 	var save_to_output = true;
-	switch(args[0])
+
+
+	// global command ?
+	var implementation = (cli.commands[args[0]] || state.commands[args[0]]);
+	if(implementation)
 	{
-		// global commands
-		case "clear":
-			cli.clear();
-			save_to_output = false;
-			success = true;
-			break;
-
-		case "help":
-			cli.out("Help - Available commands:");
-			for(var i in state.commands)
-				cli.out(i);
-			success = true;
-			break;	
-
-		default:
-			// state-specific commands
-			var implementation = state.commands[args[0]];
-			if(!implementation)
-				cli.out("ERROR! Command not found: " + args[0]);
-			else
-			{
-				var error = implementation.execute(args);
-				if(error)
-					cli.out("ERROR! " + error);
-			}
-		break;
+		var error = implementation.execute(args);
+		if(error)
+			cli.out("ERROR! " + error);
 	}
-		
+	else
+	{
+		cli.out("ERROR! Command not found: " + args[0]);
+	}
 }
 
 } // window.onload
