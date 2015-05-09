@@ -130,6 +130,8 @@ Kitten.prototype.textures = [
 ];
 Kitten.prototype.whyCantMove = function()
 {
+	if(this.team !== ingame.team)
+		return "Enemy agents cannot be controlled";
 	return null;
 }
 // ----------------------------------------------------------------------------
@@ -503,6 +505,16 @@ cli.clear = function()
 }
 
 //
+// History
+//
+
+var HISTORY_LENGTH = 30;
+cli.history_pos = 0;
+cli.history = [];
+for(var i = 0; i < HISTORY_LENGTH; i++)
+	cli.history[i] = "";
+
+//
 // Input
 //
 
@@ -510,13 +522,32 @@ cli.onkeydown = function(e) {
 	e = (e || window.event)
 	switch(e.keyCode || e.which)
 	{
-		case 9:
+		case 9: // tab
 			cli.value = cli.autocomplete(cli.value);
 			return false;
 
-		case 13:
+		case 13: // return
 			cli.inputCommand(cli.value);
+			for(var i = cli.history.length - 2; i >= 0; i--)
+				cli.history[i + 1] = cli.history[i];
+			cli.history[0] = cli.value;
+			cli.history_pos = 0;
 			cli.value = "";
+			return false;
+
+		case 38: // up
+			cli.value = cli.history[cli.history_pos++];
+			if(cli.value >= HISTORY_LENGTH || !cli.history[cli.history_pos])
+				cli.history_pos--;
+			return false;
+
+		case 40: // down
+			cli.value = cli.history[cli.history_pos--];	
+			if(cli.history_pos < 0 || !cli.history[cli.history_pos])
+			{
+				cli.history_pos++;
+				cli.value = "";
+			}
 			return false;
 	}
 }
