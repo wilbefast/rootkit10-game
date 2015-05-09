@@ -143,7 +143,21 @@ io.on('connection', function(socket){
   	room.host.other = room.guest;
 	  // send the grid to all players
 	  room.grid = new Grid(GRID_W, GRID_H);
-	  var data = { w : room.grid.w, h : room.grid.h, contents : {} }
+	  var contents = {};
+	  var tiles = room.grid.tileList;
+	  for(var team = 0; team < 2; team++)
+  	for(var n = 0; n < 3; n++)
+  	{
+  		var i;
+  		do
+  		{
+  			i = Math.floor(Math.random() * tiles.length);
+  		} 
+  		while(tiles[i].contents);
+  		new Kitten(tiles[i], team);
+  		contents[tiles[i].id] = { type: "kitten", team: team }
+  	}
+	  var data = { w : room.grid.w, h : room.grid.h, contents : contents }
 	  room.guest.emit('grid', data);
 	  room.host.emit('grid', data);
   }

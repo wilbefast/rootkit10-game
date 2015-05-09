@@ -340,14 +340,14 @@ ingame = {
 				// add contents
 				if(g.contents[id])
 				{
-					switch(g.contents[id])
+					switch(g.contents[id].type)
 					{
 						case "kitten":
-							new Kitten(tile);
+							new Kitten(tile, g.contents[id].team);
 							break;
 
 						case "egg":
-							new Egg(tile);
+							new Egg(tile, g.contents[id].team);
 							break;
 					}
 				}
