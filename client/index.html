@@ -111,6 +111,10 @@ Egg.prototype.whyCantMove = function()
 {
 	return "Cocoon-phase virus cannot be moved";
 }
+Egg.prototype.whyCantDetonate = function()
+{
+	return "Cocoon-phase virus cannot be detonated";
+}
 
 // ------------------------------------
 // Kitten
@@ -135,6 +139,10 @@ Kitten.prototype.textures = {
 	asleep : [
 		PIXI.Texture.fromImage("kitten_asleep.png"),
 		PIXI.Texture.fromImage("kitten_asleep_alt.png")
+	],
+	detonate : [
+		PIXI.Texture.fromImage("bomb.png"),
+		PIXI.Texture.fromImage("bomb_alt.png")
 	]
 };
 Kitten.prototype.whyCantMove = function()
@@ -143,7 +151,24 @@ Kitten.prototype.whyCantMove = function()
 		return "Enemy agents cannot be controlled";
 	if(this.asleep)
 		return "Agent must rest before moving again";
+	if(this.detonating)
+		return "Agent self-destruct has been initiated";
 	return null;
+}
+Kitten.prototype.whyCantDetonate = function()
+{
+	if(this.team !== ingame.team)
+		return "Enemy agents cannot be controlled";
+	if(this.asleep)
+		return "Agent must rest before acting again";
+	if(this.detonating)
+		return "Agent self-destruct has already been initiated";
+	return null;
+}
+Kitten.prototype.detonate = function()
+{
+	this.detonating = true;
+	this.sprite.texture = this.textures.detonate[this.team];
 }
 Kitten.prototype.moveTo = function(tile)
 {
@@ -159,9 +184,15 @@ Kitten.prototype.setAsleep = function(v)
 {
 	this.asleep = v;
 	if(v)
+	{
 		this.sprite.texture = this.textures.asleep[this.team];
+		cli.out("Move - Viral agent in " + this.tile.id + " thread asleep");
+	}
 	else
+	{
 		this.sprite.texture = this.textures.awake[this.team];
+		cli.out("Move - Viral agent in " + this.tile.id + " thread awake");
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -279,7 +310,6 @@ ingame = {
 		// set up socket.io
 
 		socket.on("resources", function(r) {
-			console.log("SETTING RESOURCES TO", r)
 			resources.text = r;
 		});
 
@@ -379,14 +409,22 @@ ingame = {
 			new Egg(unhashTile(data.tile_id), data.team);
 		});
 
+		socket.on("kill", function(tile_id) {
+			GameObject.clean(unhashTile(tile_id));
+		});
+
 		socket.on("move", function(data) {
 			unhashTile(data.from_id).contents.moveTo(unhashTile(data.to_id));
 		});
 
 		socket.on("awaken", function(tile_id) {
-			console.log(tile_id);
 			unhashTile(tile_id).contents.setAsleep(false);
 		});
+
+		socket.on("detonate", function(tile_id) {
+			unhashTile(tile_id).contents.detonate();
+			cli.out("WARNING - agent in " + tile_id + " is preparing to self-destruct");
+		})
 
 		socket.on("say", function(msg) {
 			cli.out("ENEMY: " + msg);
@@ -396,6 +434,7 @@ ingame = {
 			var t = unhashTile(data.id);
 			GameObject.clean(t);
 			new Kitten(t, data.team);
+			cli.out("Spawn - Viral agent in partition " + t.id + " has reached maturity");
 		});
 
 		socket.on("hatch", function(data) {
@@ -466,6 +505,26 @@ ingame = {
 				return "Use 'spawn [partition]' to create a viral agent";
 			}
 		},
+		"detonate" : {
+			execute : function(args) {
+				var who = args[1];
+				var who_tile = unhashTile(who);
+				if(!who)
+					return "Detonate - Argument missing: target";
+				if(!who_tile.contents)
+					return "Detonate - Target partition does not contain an agent";
+				var whyCantDetonate = who_tile.contents.whyCantDetonate();
+				if(whyCantDetonate)
+					return "Detonate - " + whyCantDetonate;
+				cli.out("Detonate - " + who_tile.id + " self-destruct sequence initiated");
+				socket.emit("detonate", { 
+					who : who_tile.id
+				});
+			},
+			help : function() {
+				return "Use 'detonate [partition] to cause an allied agent to self destruct";
+			}
+		},
 		"move" : {
 			execute : function(args) {
 				var from = args[1];
@@ -476,7 +535,7 @@ ingame = {
 				if(!from_tile)
 					return "Move - Invalid argument: source";
 				if(!from_tile.contents)
-					return "Move - Source partition does not contain and agent";
+					return "Move - Source partition does not contain an agent";
 				var whyCantMove = from_tile.contents.whyCantMove();
 				if(whyCantMove)
 					return "Move - " + whyCantMove;

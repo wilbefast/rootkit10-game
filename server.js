@@ -45,6 +45,9 @@ Egg.prototype.type = "egg";
 Egg.prototype.canMove = function() {
 	return false;
 }
+Egg.prototype.canDetonate = function() {
+	return false;
+}
 
 function Kitten(tile, team)
 {
@@ -52,17 +55,62 @@ function Kitten(tile, team)
 	tile.contents = this;
 	this.team = team;
 	this.asleep = false;
+	this.detonating = false;
 	return this;
 }
 Kitten.prototype.type = "kitten";
 Kitten.prototype.canMove = function() {
 	return !this.asleep;
 }
-Kitten.prototype.moveTo = function(tile) {
+Kitten.prototype.canDetonate = function() {
+	return !this.asleep && !this.detonating;
+}
+Kitten.prototype.moveTo = function(tile, socket, room, echo) {
 	this.tile.contents = null;
 	this.tile = tile;
 	tile.contents = this;
 	asleep = true;
+	var kitten = this;
+	setTimeout(function() {
+		if(!kitten.purge)
+		{
+			kitten.asleep = false;
+			socket.emit('awaken', kitten.tile.id);
+			socket.other.emit('awaken', kitten.tile.id);
+		}
+	}, 7000);
+	socket.emit('move', echo);
+	socket.other.emit('move', echo);
+}
+Kitten.prototype.detonate = function(socket, room) {
+	this.detonating = true;
+	var grid = room.grid;
+	var kitten = this;
+	socket.emit('detonate', this.tile.id);
+	socket.other.emit('detonate', this.tile.id);
+	setTimeout(function() {
+		if(!kitten.purge)
+		{
+			kitten.purge = true;
+
+			for(x = Math.max(0, kitten.tile.grid_x - 2); 
+				x < Math.min(grid.w - 1, kitten.tile.grid_x + 2); 
+				x++)
+			for(y = Math.max(0, kitten.tile.grid_y - 2); 
+				y < Math.min(grid.h - 1, kitten.tile.grid_y + 2); 
+				y++)
+			{
+				var tile = grid.tileList[GRID_W*y + x];
+				if(tile.contents)
+				{
+					tile.contents.purge = true;
+					tile.contents = null;
+					socket.emit('kill', tile.id);
+					socket.other.emit('kill', tile.id);
+				}
+			}
+		}
+	}, 4000);
 }
 
 // ------------------------------------
@@ -163,6 +211,10 @@ io.on('connection', function(socket){
 	  // reset game state variables
 	  room.guest.emit('resources', room.guest.resources = 3);
 	  room.host.emit('resources', room.host.resources = 3);
+	  // set resource spawn interval
+	  setInterval(function() {
+
+	  }, 1000)
   }
   socket.room = room;
 
@@ -184,20 +236,24 @@ io.on('connection', function(socket){
   		&& (mover.team === socket.team)
   		&& mover.canMove(to_tile))
   	{
-  		mover.moveTo(to_tile);
-  		setTimeout(function() {
-  			if(!mover.purge)
-  			{
-  				mover.asleep = false;
-  				socket.emit('awaken', mover.tile.id);
-  				socket.other.emit('awaken', mover.tile.id);
-  			}
-  		}, 7000)
-  		socket.emit('move', data);
-  		socket.other.emit('move', data);
+  		mover.moveTo(to_tile, socket, room, data);
   	}
 
   });
+
+  socket.on('detonate', function(data) {
+  	var who_tile = room.grid.unhashTile(data.who);
+  	if(!who_tile)
+  		return;
+  	var kamikaze = who_tile.contents;
+  	if(kamikaze 
+  		&& kamikaze.team === socket.team 
+  		&& kamikaze.canDetonate())
+  	{
+  		kamikaze.detonate(socket, room);
+  	}
+  });
+
 
 	socket.on('spawn', function(tile_id) {
 		if(!room.host || !room.guest)
