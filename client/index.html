@@ -256,14 +256,15 @@ statePrototype.set(title);
 // In-game state
 // ------------------------------------
 
-var TILE_W = 51
-var TILE_H = 51
+var TILE_W = 51;
+var TILE_H = 51;
 
-var grid = null
+var grid = null;
+var resources = 3;
 
 var unhashTile = function(s)
 {
-	return grid.tileHash[s];
+	return grid.tileHash[s.toUpperCase()];
 }
 
 ingame = {
@@ -276,6 +277,12 @@ ingame = {
 		root.position.y = -32;
 
 		// set up socket.io
+
+		socket.on("resources", function(r) {
+			console.log("SETTING RESOURCES TO", r)
+			resources.text = r;
+		});
+
 		socket.on("grid", function(g) {
 			// reset the grid to line-up with the server
 			grid = {
@@ -293,6 +300,16 @@ ingame = {
 			};
 			var background = PIXI.Texture.fromImage("tile.png");
 
+			// add the resources counter
+			var resources_label = new PIXI.Text("RESOURCES", font);
+			root.addChild(resources_label);
+			resources_label.position.x = (grid.w/2 - 0.5)*TILE_W;
+			resources_label.position.y = (2 + grid.h)*TILE_H
+			resources = new PIXI.Text("0", font);
+			resources_label.addChild(resources);
+			resources.position.x = 4*TILE_W;
+
+			// for each tile
 			for(var x = 0; x < grid.w; x++)
 			for(var y = 0; y < grid.h; y++)
 			{
@@ -431,6 +448,8 @@ ingame = {
 				var t = unhashTile(args[1])
 				if(t)
 				{
+					if(resources.text <= 0)
+						return "Spawn - Not enough resources"
 					if(t.children.length > 1)
 						return "Spawn - Partition " + t.id + " is not free";
 					else

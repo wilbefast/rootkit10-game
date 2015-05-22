@@ -160,6 +160,9 @@ io.on('connection', function(socket){
 	  var data = { w : room.grid.w, h : room.grid.h, contents : contents }
 	  room.guest.emit('grid', data);
 	  room.host.emit('grid', data);
+	  // reset game state variables
+	  room.guest.emit('resources', room.guest.resources = 3);
+	  room.host.emit('resources', room.host.resources = 3);
   }
   socket.room = room;
 
@@ -201,6 +204,11 @@ io.on('connection', function(socket){
 			return;
 
 		var tile = room.grid.unhashTile(tile_id);
+
+		if(socket.resources <= 0)
+			return;
+		socket.resources--;
+		socket.emit("resources", socket.resources);
 
 		if(tile && !tile.contents)
 		{
